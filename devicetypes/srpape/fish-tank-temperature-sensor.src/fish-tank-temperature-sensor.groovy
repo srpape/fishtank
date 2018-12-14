@@ -21,18 +21,14 @@ metadata {
         command "refresh"
 	}
 
-
-	simulator {
-		// TODO: define status and reply messages here
-	}
-
 	tiles {
         valueTile("temperature", "device.temperature", width: 2, height: 2) {
-            state("temperature", label:'${currentValue}', unit:"dF",
+            state("temperature", label:'${currentValue}', unit:"dF", icon:"st.Weather.weather2",
                 backgroundColors:[
-                    [value: 75, color: "#1e9cbb"],
-                    [value: 80, color: "#44b621"],
-                    [value: 85, color: "#ff0000"],                ]
+                    [value: 75, color: "#0000ff"],
+                    [value: 80, color: "#D3D3D3"],
+                    [value: 85, color: "#ff0000"],
+                ]
             )
         }
         standardTile("refresh", "command.refresh", inactiveLabel: false) {

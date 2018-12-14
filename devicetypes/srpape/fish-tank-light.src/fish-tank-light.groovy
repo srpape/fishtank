@@ -37,17 +37,18 @@ metadata {
 
 // parse events into attributes
 def parse(command) {
-  if (command.state != state.internal_level) {
-    if (state.internal_level == 0) {
-      state.internal_level = command.state.toInteger()
+  def newState = command.state.toInteger()
+  if (newState != state.internal_level) {
+    if (newState == 0) {
+      state.internal_level = newState
       sendEvent(name: "switch", value: "off")
-    } else if(state.internal_level == 1) {
-      state.internal_level = command.state.toInteger()
+    } else if(newState == 1) {
+      state.internal_level = newState
       sendEvent(name: "switch", value: "on")
       state.level = 49
       sendEvent(name: "level", value: state.level)
-    } else if(state.internal_level == 2) {
-      state.internal_level = command.state.toInteger()
+    } else if(newState == 2) {
+      state.internal_level = newState
       sendEvent(name: "switch", value: "on")
       state.level = 100
       sendEvent(name: "level", value: state.level)
