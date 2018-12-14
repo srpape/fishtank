@@ -86,7 +86,7 @@ class Temperature(Resource):
 class PH(Resource):
     def get(self, name):
         if(name == "tank"):
-            # Read the pH sensor
+            # Read the pH sensor 
             ph_sensor = AtlasI2C(address=99)
             pH = ph_sensor.query('R')
             print(pH)
@@ -95,8 +95,6 @@ class PH(Resource):
                 message = {
                     'pH': pH
                 }
-
-                myjson = json.dumps(message).encode()
                 resp = make_response(json.dumps(message))
                 resp.headers['Device'] = 'ph/tank'
                 return resp
