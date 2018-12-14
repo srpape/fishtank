@@ -39,6 +39,7 @@ metadata {
 // parse events into attributes
 def parse(command) {
   if (command.pH != null) {
+    log.debug "Updating pH value: ${command.pH}" 
     sendEvent(name: "pH", value: command.pH)
   }
 }
