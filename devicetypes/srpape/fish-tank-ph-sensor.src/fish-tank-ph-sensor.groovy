@@ -22,10 +22,10 @@ metadata {
 
   tiles {
     valueTile("pH", "device.pH", width: 2, height: 2) {
-      state("pH", label:'${currentValue}', unit:"dF",
+      state("pH", label:'${currentValue}',
         backgroundColors:[
           [value: 6, color: "#ff0000"],
-          [value: 7, color: "#00ff00"],
+          [value: 7, color: "#D3D3D3"],
           [value: 8, color: "#0000ff"],
         ]
       )
