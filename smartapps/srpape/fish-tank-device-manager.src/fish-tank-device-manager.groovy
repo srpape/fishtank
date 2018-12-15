@@ -14,21 +14,21 @@
  *
  */
 definition(
-    name: "Fish Tank Device Manager",
-    namespace: "srpape",
-    author: "Stephen Pape",
-    description: "Manager for Raspberry Pi fish tank devices",
-    category: "",
-    iconUrl: "https://s3.amazonaws.com/smartapp-icons/Convenience/Cat-Convenience.png",
-    iconX2Url: "https://s3.amazonaws.com/smartapp-icons/Convenience/Cat-Convenience@2x.png",
-    iconX3Url: "https://s3.amazonaws.com/smartapp-icons/Convenience/Cat-Convenience@2x.png",
-    singleInstance: true)
+  name: "Fish Tank Device Manager",
+  namespace: "srpape",
+  author: "Stephen Pape",
+  description: "Manager for Raspberry Pi fish tank devices",
+  category: "",
+  iconUrl: "https://s3.amazonaws.com/smartapp-icons/Convenience/Cat-Convenience.png",
+  iconX2Url: "https://s3.amazonaws.com/smartapp-icons/Convenience/Cat-Convenience@2x.png",
+  iconX3Url: "https://s3.amazonaws.com/smartapp-icons/Convenience/Cat-Convenience@2x.png",
+  singleInstance: true)
 
 import groovy.json.JsonBuilder
 import groovy.json.JsonSlurper
 
 preferences {
-	page(name: "page1")
+  page(name: "page1")
 }
 
 def page1() {
@@ -59,13 +59,13 @@ def updated() {
 }
 
 def initialize() {
-    writeLog("Initialize")
-    subscribe(location, null, lanResponseHandler, [filterEvents:false])
-    addChildDevices()
+  writeLog("Initialize")
+  subscribe(location, null, lanResponseHandler, [filterEvents:false])
+  addChildDevices()
 }
 
 def uninstalled() {
-    removeChildDevices()
+  removeChildDevices()
 }
 
 private addFishTankDevice(String deviceId, String deviceType, String deviceName) {
@@ -90,26 +90,30 @@ private removeChildDevices() {
 }
 
 def lanResponseHandler(evt) {
-    def map = stringToMap(evt.stringValue)
+  def map = stringToMap(evt.stringValue)
 
-	if (map.headers == null || map.body == null)
-    	return // Not sure why this happens, but it causes annoying log errors
+  if (map.headers == null || map.body == null) {
+    writeLog("Null map headers or body")   
+    return // Not sure why this happens, but it causes annoying log errors
+  }
 
-    def headers = getHttpHeaders(map.headers);
-    def body = getHttpBody(map.body);
+  def headers = getHttpHeaders(map.headers);
+  def body = getHttpBody(map.body);
 
-    def deviceId = headers.Device
-    if (deviceId == null)
-    	return
+  def deviceId = headers.Device
+  if (deviceId == null) {
+     writeLog("Null deviceId")
+     return
+  }
 
-  	def device = getChildDevice(deviceId)
-  	if (device) {
-       	writeLog("Updating Device ${deviceId} using body: ${body}")
-    	device.parse(body)
-  	} else {
-	    writeLog("Received unknown event - Headers:  ${headers}")
-    	writeLog("Received unknown event - Body: ${body}")   
-    }
+  def device = getChildDevice(deviceId)
+  if (device) {
+    writeLog("Updating Device ${deviceId} using body: ${body}")
+    device.parse(body)
+  } else {
+    writeLog("Received unknown event - Headers:  ${headers}")
+    writeLog("Received unknown event - Body: ${body}")   
+  }
 }
 
 public refresh(String deviceId) {
