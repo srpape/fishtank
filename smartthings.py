@@ -66,16 +66,19 @@ for name in lights:
 # Prepare the temperature sensor
 temp_sensor = W1ThermSensor(W1ThermSensor.THERM_SENSOR_DS18B20, "02099177ba76")
 
-def round_of_rating(number):
-    return round(number * 10) / 10
-
 class Temperature(Resource):
     def get(self, name):
         if(name == "tank"):
-            tempC = round_of_rating(temp_sensor.get_temperature(W1ThermSensor.DEGREES_C))
-            tempF = round(9.0/5.0 * tempC + 32, 3)
+            # Read the temperature sensor
+            # The temperature reading is unstable
+            # Here we round to the nearest 0.25C degrees for less jitter
+            tempCRaw = temp_sensor.get_temperature(W1ThermSensor.DEGREES_C)
+            tempC = round(tempCRaw * 4) / 4
+            tempF = round((9.0/5.0 * tempC + 32), 2)
             message = {
-                'temperature': tempF
+                'raw': tempCRaw,
+                'temperatureC': tempC,
+                'temperatureF': tempF
             }
             resp = make_response(json.dumps(message))
             resp.headers['Device'] = 'temperature/tank'
@@ -91,7 +94,7 @@ class PH(Resource):
             pH = ph_sensor.query('R')
             print(pH)
             if pH.startswith('Command succeeded '):
-                pH = round(float(pH[18:].rstrip("\0")), 2)
+                pH = round(float(pH[18:].rstrip("\0")), 1)
                 message = {
                     'pH': pH
                 }
