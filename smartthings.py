@@ -5,12 +5,12 @@ from flask import make_response
 from flask import request
 
 from flask_restful import Api, Resource, reqparse
-from w1thermsensor import W1ThermSensor
 from AtlasI2C import AtlasI2C
 
 import RPi.GPIO as GPIO
 import urllib.request
 import json
+import numpy
 
 app = Flask(__name__)
 api = Api(app)
@@ -56,6 +56,16 @@ for name, valve in valves.items():
     GPIO.setup(pin, GPIO.OUT)
     GPIO.output(pin, GPIO.LOW)
 
+
+# Load the initial light state (if possible)
+try:
+    with open('/tmp/tank_light_state.txt', 'r') as f:
+        print("Old state: " + lights['tank']['state'])
+        lights['tank']['state'] = f.read()
+        print("New state: " + lights['tank']['state'])
+except IOError:
+    pass
+
 for name in lights:
     light = lights[name]
     state = light['states'][light['state']]
@@ -63,24 +73,21 @@ for name in lights:
         GPIO.setup(entry, GPIO.OUT)
         GPIO.output(entry, state[entry])
 
-# Prepare the temperature sensor
-temp_sensor = W1ThermSensor(W1ThermSensor.THERM_SENSOR_DS18B20, "02099177ba76")
-
 class Temperature(Resource):
     def get(self, name):
         if(name == "tank"):
-            # Read the temperature sensor
-            # The temperature reading is unstable
-            # Here we round to the nearest 0.25C degrees for less jitter
-            tempCRaw = temp_sensor.get_temperature(W1ThermSensor.DEGREES_C)
-            tempC = round(tempCRaw * 4) / 4
-            tempF = round((9.0/5.0 * tempC + 32), 2)
+            # Read the temp from our service
+            with open('/tmp/tank_temperature.txt', 'r') as f:
+                tempC = float(f.read())
+
+            tempF = round((9.0/5.0 * tempC + 32), 1)
             message = {
-                'raw': tempCRaw,
                 'temperatureC': tempC,
-                'temperatureF': tempF
+                'temperatureF': tempF,
             }
             resp = make_response(json.dumps(message))
+
+            resp.headers['CONTENT-TYPE'] = 'application/json'
             resp.headers['Device'] = 'temperature/tank'
             return resp
 
@@ -145,7 +152,7 @@ class Valve(Resource):
                     req = urllib.request.Request('http://192.168.1.121:39500/notify', method='NOTIFY', headers=headers, data=myjson)
                     urllib.request.urlopen(req, timeout=15)
 
-            gpio = GPIO.HIGH #TODO
+            gpio = GPIO.HIGH
         elif state == 'closed':
             gpio = GPIO.LOW
         else:
@@ -202,6 +209,9 @@ class Light(Resource):
         state = light['states'][light['state']]
         for entry in state:
             GPIO.output(entry, state[entry])
+
+        with open('/tmp/tank_light_state.txt', 'w') as f:
+            f.write(str(lights['tank']['state']))
 
         message = {
             'state': light['state']

@@ -1,13 +1,16 @@
 #!/usr/bin/env python3
 
 from urllib.request import urlopen
-from w1thermsensor import W1ThermSensor
-import urllib.request
-import json
 from AtlasI2C import AtlasI2C
 
-myAPI = "xxxxxxxxxxxxx"
-baseURL = 'https://api.thingspeak.com/update?api_key=%s' % myAPI
+import urllib.request
+import json
+import os
+
+with open(os.path.expanduser('~/.fishtank_thingspeak_api_key'), 'r') as f:
+    thingspeak_api_key = f.read()
+
+baseURL = 'https://api.thingspeak.com/update?api_key=%s' % thingspeak_api_key
 
 def logThingSpeak(temp, pH):
     try:
@@ -15,7 +18,7 @@ def logThingSpeak(temp, pH):
         f.close()
     except Exception:
         # For some reason the data was not accepted
-        # ThingSpeek gives a lot of 500 errors 
+        # ThingSpeek gives a lot of 500 errors
         pass
 
 def logSmartThings(tempF, pH):
@@ -51,13 +54,11 @@ def logSmartThings(tempF, pH):
         req = urllib.request.Request('http://192.168.1.121:39500/notify', method='NOTIFY', headers=headers, data=myjson)
         urllib.request.urlopen(req, timeout=15)
 
-# Read the temp sensor
-# The temperature reading is unstable
-# Here we round to the nearest 0.25C degrees for less jitter
-temp_sensor = W1ThermSensor(W1ThermSensor.THERM_SENSOR_DS18B20, "02099177ba76")
-tempCRaw = temp_sensor.get_temperature(W1ThermSensor.DEGREES_C)
-tempC = round(tempCRaw * 4) / 4
-tempF = round((9.0/5.0 * tempC + 32), 2)
+# Read the temp from our service
+with open('/tmp/tank_temperature.txt', 'r') as f:
+    tempC = float(f.read())
+
+tempF = round((9.0/5.0 * tempC + 32), 1)
 
 # Read the pH sensor
 ph_sensor = AtlasI2C(address=99)
