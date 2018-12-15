@@ -39,7 +39,7 @@ metadata {
 
 // parse events into attributes
 def parse(command) {
-  if (command.temperature != null) {
+  if (command.temperatureF != null) {
     log.debug "Updating temperature value: ${command.temperatureF}"
     sendEvent(name: "temperature", value: command.temperatureF)
   }
