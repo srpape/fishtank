@@ -42,6 +42,8 @@ def parse(command) {
   if (command.temperatureF != null) {
     log.debug "Updating temperature value: ${command.temperatureF}"
     sendEvent(name: "temperature", value: command.temperatureF)
+  } else {
+      log.debug "No temperatureF in comand: ${command}"
   }
 }
 
