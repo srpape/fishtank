@@ -7,7 +7,7 @@ import json
 import os
 
 with open(os.path.expanduser('~/.fishtank_thingspeak_api_key'), 'r') as f:
-    thingspeak_api_key = f.read()
+    thingspeak_api_key = f.read().rstrip()
 
 baseURL = 'https://api.thingspeak.com/update?api_key=%s' % thingspeak_api_key
 
