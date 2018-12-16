@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 
 from urllib.request import urlopen
-from AtlasI2C import AtlasI2C
 
 import urllib.request
 import json
@@ -60,14 +59,9 @@ with open('/tmp/tank_temperature.txt', 'r') as f:
 
 tempF = round((9.0/5.0 * tempC + 32), 1)
 
-# Read the pH sensor
-ph_sensor = AtlasI2C(address=99)
-
-pH = ph_sensor.query('RT,' + str(tempC))
-if pH.startswith('Command succeeded '):
-    pH = round(float(pH[18:].rstrip("\0")), 1)
-else:
-    pH = None
+# Read the pH from our service
+with open('/tmp/tank_ph.txt', 'r') as f:
+    pH = float(f.read())
 
 # Post to ThingSpeak
 logThingSpeak(tempF, pH)

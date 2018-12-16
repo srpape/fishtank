@@ -5,7 +5,6 @@ from flask import make_response
 from flask import request
 
 from flask_restful import Api, Resource, reqparse
-from AtlasI2C import AtlasI2C
 
 import RPi.GPIO as GPIO
 import urllib.request
@@ -96,18 +95,16 @@ class Temperature(Resource):
 class PH(Resource):
     def get(self, name):
         if(name == "tank"):
-            # Read the pH sensor 
-            ph_sensor = AtlasI2C(address=99)
-            pH = ph_sensor.query('R')
-            print(pH)
-            if pH.startswith('Command succeeded '):
-                pH = round(float(pH[18:].rstrip("\0")), 1)
-                message = {
-                    'pH': pH
-                }
-                resp = make_response(json.dumps(message))
-                resp.headers['Device'] = 'ph/tank'
-                return resp
+            # Read the pH from our service
+            with open('/tmp/tank_ph.txt', 'r') as f:
+                pH = float(f.read())
+
+            message = {
+                'pH': pH
+            }
+            resp = make_response(json.dumps(message))
+            resp.headers['Device'] = 'ph/tank'
+            return resp
 
         return "pH sensor not found", 404
 
