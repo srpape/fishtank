@@ -10,12 +10,14 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from AtlasI2C import AtlasI2C
 from w1thermsensor import W1ThermSensor
 from collections import deque
+from datetime import datetime
 
 import RPi.GPIO as GPIO
 import urllib.request
 import json
 import numpy
 import os
+import logging
 
 app = Flask(__name__)
 api = Api(app)
@@ -41,20 +43,49 @@ class Switch:
         self.state = 'on'
 
 class Valve:
-    def __init__(self, name, gpio):
+    def __init__(self, name, gpio, open_precheck=None, open_action=None, close_action=None):
         self.name = name
         self.__switch = Switch(gpio)
+        self.__open_precheck = open_precheck
+        self.__open_action = open_action
+        self.__close_action = None
 
         self.close()
         self.notify()
 
+        # Do this after calling close() so we don't run close_action before opening
+        self.__close_action = close_action
+
+    def open_duration(self):
+        if self.__open_time == 0:
+            return 0
+        return (datetime.now() - self.__open_time).total_seconds()
+
     def close(self):
         self.__switch.off()
         self.state = 'closed'
+        self.__open_time = 0
+        if self.__close_action is not None:
+            self.__close_action()
 
     def open(self):
+        if self.__open_precheck is not None and not self.__open_precheck():
+            app.logger.info('Refusing to open ' + self.name + ' due to precheck')
+            return
+
+        # Only one valve can ever be open so we don't blow a fuse
+        # Close any other open valves
+        for k, k_valve in valves.items():
+            if k is not self and k_valve.is_open():
+                app.logger.info('Closing ' + k_valve.name + ' to open ' + self.name)
+                k_valve.close()
+                k_valve.notify()
+
         self.__switch.on()
         self.state = 'open'
+        self.__open_time = datetime.now()
+        if self.__open_action is not None:
+            self.__open_action()
 
     def is_open(self):
         return self.state == 'open'
@@ -169,7 +200,7 @@ class PHSensor:
 
     def read(self):
         # Read the temp from our service
-        pH = self.__sensor.query('RT,' + str(self.__temp_sensor.read()))
+        pH = self.__sensor.query('RT,' + str(self.__temp_sensor.readC()))
         if pH.startswith('Command succeeded '):
             pH = float(pH[18:].rstrip("\0"))
             return pH
@@ -207,12 +238,6 @@ class PHSensor:
         body = json.dumps(message).encode()
         return body
 
-    def update(self):
-        pH = self.__sensor.query('RT,' + str(self.__temp_sensor.read()))
-        if pH.startswith('Command succeeded '):
-            pH = float(pH[18:].rstrip("\0"))
-            self.__ph_readings.append(pH)
-
 class TemperatureSensor:
     def __init__(self, name):
         self.__name = name
@@ -221,9 +246,13 @@ class TemperatureSensor:
     def celcius_to_fahrenheit(self, tempC):
         return round((9.0/5.0 * tempC + 32), 2)
 
-    def read(self):
+    def readC(self):
         # Read the temp from our service
         return self.__sensor.get_temperature(W1ThermSensor.DEGREES_C)
+
+    def readF(self):
+        # Read the temp from our service
+        return round(self.__sensor.get_temperature(W1ThermSensor.DEGREES_F), 2)
 
     def get_response(self):
         '''
@@ -250,7 +279,7 @@ class TemperatureSensor:
         '''
         Get the body we send out for response/notify
         '''
-        tempC = self.read()
+        tempC = self.readC()
         tempF = self.celcius_to_fahrenheit(tempC)
         message = {
             'temperatureC': tempC,
@@ -270,6 +299,46 @@ class WaterLevelSensor:
     def is_full(self):
         return GPIO.input(self.__gpio)
 
+# Prepare scheduler
+scheduler = BackgroundScheduler(daemon=True)
+scheduler.start()
+
+#@scheduler.scheduled_job('interval', id='top_off', minutes=1)
+def top_off():
+    #app.logger.info("Checking for top off")
+    fill_valve = valves['fill']
+    drain_valve = valves['drain']
+    if not fill_valve.is_open() and not drain_valve.is_open():
+        if not water_level_sensor.is_full():
+            app.logger.info("Topping off tank")
+            fill_valve.open()
+            fill_valve.notify()
+
+def close_fill_when_full():
+    #app.logger.info("Checking if tank is full")
+    if water_level_sensor.is_full():
+        app.logger.info("Tank is full, closing fill valve")
+        fill_valve = valves['fill']
+        fill_valve.close()
+        fill_valve.notify()
+    elif fill_valve.open_duration() > 1200:
+        app.logger.warn("Fill valve open for too long!")
+        fill_valve = valves['fill']
+        fill_valve.close()
+        fill_valve.notify()
+
+# Stop draining the tank
+def water_change_drain_complete():
+    scheduler.remove_job('water_change_drain_complete')
+
+    drain_valve = valves['drain']
+    drain_valve.close()
+    drain_valve.notify()
+
+    fill_valve = valves['fill']
+    fill_valve.open() # Should auto shut-off when full
+    fill_valve.notify()
+
 # Our ThingSpeak API Key
 with open(os.path.expanduser('/home/papes/.fishtank_thingspeak_api_key'), 'r') as f:
     thingspeak_api_key = f.read().rstrip()
@@ -283,7 +352,11 @@ water_level_sensor = WaterLevelSensor(5)
 # Our valves
 valves = {
     'drain': Valve('drain', 17),
-    'fill': Valve('fill', 27),
+    'fill': Valve('fill', 27,
+        open_precheck= lambda: not water_level_sensor.is_full(),
+        open_action = lambda: scheduler.add_job(close_fill_when_full, 'interval', seconds=1, id='close_fill_when_full'),
+        close_action = lambda: scheduler.remove_job('close_fill_when_full')
+    ),
 }
 
 # Our lights
@@ -291,21 +364,8 @@ lights = {
     'tank': Light()
 }
 
-# Prepare scheduler
-scheduler = BackgroundScheduler(daemon=True)
-scheduler.start()
-
-def close_fill_when_full():
-    print("Checking if full")
-    if water_level_sensor.is_full():
-        valve = valves['fill']
-        valve.close()
-        valve.notify()
-        scheduler.remove_job('close_fill_when_full')
-
 def log_to_thingspeak():
-    tempC = temp_sensor.read()
-    tempF = temp_sensor.celcius_to_fahrenheit(tempC)
+    tempF = temp_sensor.readF()
     pH = ph_sensor.read()
     try:
         f = urllib.request.urlopen(thingspeak_base_url + "&field1=%s&field2=%s" % (str(tempF), str(pH)), timeout=15)
@@ -362,35 +422,13 @@ class ValveHTTP(Resource):
 
         # Check the desired action
         if state == 'open':
-            # Turn off any other valves first so we don't blow a fuse
-            for k, k_valve in valves.items():
-                if k != valve.name and k_valve.is_open():
-                    k_valve.close()
-                    k_valve.notify()
-
-            # Special handling for the fill valve
-            if name == 'fill':
-                # Don't open it if the tank is full
-                if not water_level_sensor.is_full():
-                    # Allow the valve to open
-                    valve.open()
-
-                    # Start monitoring for a full tank
-                    scheduler.add_job(close_fill_when_full, 'interval', seconds=1, id='close_fill_when_full')
-                else:
-                    print('Refusing to open fill valve on a full tank!')
-            else:
-                # Special handling for the fill valve
-                if name == 'fill':
-                    scheduler.remove_job('close_fill_when_full')
-
-                # Open the target valve
-                valve.open()
+            # Open the target valve
+            valve.open()
         elif state == 'closed':
             # Close the target valve
             valve.close()
         else:
-            return "Invalid State"
+            return "Invalid State", 400
 
         # Return the valve's response
         return valve.get_response()
@@ -425,11 +463,29 @@ class LightHTTP(Resource):
         light.set_state(state)
         return light.get_response()
 
+def change_water():
+    if not water_level_sensor.is_full:
+        return "Tank not full, politely refusing", 406
+
+    scheduler.add_job(water_change_drain_complete, 'interval', seconds=60, id='water_change_drain_complete')
+    drain_valve = valves['drain']
+    drain_valve.open()
+    drain_valve.notify()
+    return "OK"
+
+class Action(Resource):
+    def get(self, name):
+        if name == 'change_water':
+            return change_water()
+
+        return "Action not found", 404
+
 api.add_resource(LightHTTP, "/light/<string:name>")
 api.add_resource(Temperature, "/temperature/<string:name>")
 api.add_resource(PH, "/ph/<string:name>")
 api.add_resource(ValveHTTP, "/valve/<string:name>")
 api.add_resource(Subscription, "/subscribe/<string:name>")
+api.add_resource(Action, "/action/<string:name>")
 
 try:
     # With the reloader enabled, apscheduler executes twice, one in each process
