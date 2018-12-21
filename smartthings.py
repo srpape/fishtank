@@ -9,7 +9,6 @@ from flask_restful import Api, Resource, reqparse
 from apscheduler.schedulers.background import BackgroundScheduler
 from AtlasI2C import AtlasI2C
 from w1thermsensor import W1ThermSensor
-from collections import deque
 from datetime import datetime
 
 import RPi.GPIO as GPIO
@@ -58,9 +57,36 @@ class Switch:
         GPIO.output(self.__gpio, GPIO.HIGH)
         self.state = 'on'
 
-class Valve:
-    def __init__(self, name, gpio, open_precheck=None, open_action=None, close_action=None):
-        self.name = name
+class SmartThingsAPIDevice:
+    def __init__(self, device_name, device_type):
+        self.device_type = device_type
+        self.device_name = device_name
+
+    def notify(self):
+        '''
+        Push an unsolicited update to SmartThings
+        '''
+        body = self.get_body()
+        headers = {
+            'Content-Type': 'application/json',
+            'Content-Length': len(body),
+            'Device': self.device_type + '/' + self.device_name
+        }
+        req = urllib.request.Request(notify_url, method='NOTIFY', headers=headers, data=body)
+        urllib.request.urlopen(req, timeout=15)
+
+    def get_response(self):
+        '''
+        Get a response for an HTTP GET or POST
+        '''
+        resp = make_response(self.get_body())
+        resp.headers['Device'] = self.device_type + '/' + self.device_name
+        return resp
+
+class Valve(SmartThingsAPIDevice):
+    def __init__(self, device_name, gpio, open_precheck=None, open_action=None, close_action=None):
+        super(Valve, self).__init__(device_type='valve', device_name=device_name)
+
         self.__switch = Switch(gpio)
         self.__open_precheck = open_precheck
         self.__open_action = open_action
@@ -85,17 +111,17 @@ class Valve:
             self.__close_action()
 
     def open(self):
-        if self.__open_precheck is not None and not self.__open_precheck():
-            app.logger.info('Refusing to open ' + self.name + ' due to precheck')
-            return
-
         # Only one valve can ever be open so we don't blow a fuse
         # Close any other open valves
         for k, k_valve in valves.items():
             if k is not self and k_valve.is_open():
-                app.logger.info('Closing ' + k_valve.name + ' to open ' + self.name)
+                app.logger.info('Closing ' + k_valve.device_name + ' to open ' + self.device_name)
                 k_valve.close()
                 k_valve.notify()
+
+        if self.__open_precheck is not None and not self.__open_precheck():
+            app.logger.info('Refusing to open ' + self.device_name + ' due to precheck')
+            return
 
         self.__switch.on()
         self.state = 'open'
@@ -106,28 +132,7 @@ class Valve:
     def is_open(self):
         return self.state == 'open'
 
-    def notify(self):
-        '''
-        Push an unsolicited update to SmartThings
-        '''
-        body = self.__get_body()
-        headers = {
-            'Content-Type': 'application/json',
-            'Content-Length': len(body),
-            'Device': 'valve/' + self.name
-        }
-        req = urllib.request.Request(notify_url, method='NOTIFY', headers=headers, data=body)
-        urllib.request.urlopen(req, timeout=15)
-
-    def get_response(self):
-        '''
-        Get a response for an HTTP GET or POST
-        '''
-        resp = make_response(self.__get_body())
-        resp.headers['Device'] = 'valve/' + self.name
-        return resp
-
-    def __get_body(self):
+    def get_body(self):
         '''
         Get the body we send out for response/notify
         '''
@@ -135,16 +140,17 @@ class Valve:
         body = json.dumps(message).encode()
         return body
 
-class Light:
-    def __init__(self):
+class Light(SmartThingsAPIDevice):
+    def __init__(self, device_name):
+        super(Light, self).__init__(device_type='light', device_name=device_name)
+
         self.__day_light = Switch(23)
         self.__night_light = Switch(25)
-        self.name = 'tank'
         self.state = 0
 
         # Load the initial light state (if possible)
         try:
-            with open('/tmp/tank_light_state.txt', 'r') as f:
+            with open('/tmp/' + self.device_name + '_light_state.txt', 'r') as f:
                 self.set_state(int(f.read()))
         except IOError:
              pass
@@ -178,28 +184,7 @@ class Light:
         with open('/tmp/tank_light_state.txt', 'w') as f:
             f.write(str(self.state))
 
-    def get_response(self):
-        '''
-        Get a response for an HTTP GET or POST
-        '''
-        resp = make_response(self.__get_body())
-        resp.headers['Device'] = 'light/' + self.name
-        return resp
-
-    def notify(self):
-        '''
-        Push an unsolicited update to SmartThings
-        '''
-        body = self.__get_body()
-        headers = {
-            'Content-Type': 'application/json',
-            'Content-Length': len(body),
-            'Device': 'light/' + self.name
-        }
-        req = urllib.request.Request(notify_url, method='NOTIFY', headers=headers, data=body)
-        urllib.request.urlopen(req, timeout=15)
-
-    def __get_body(self):
+    def get_body(self):
         '''
         Get the body we send out for response/notify
         '''
@@ -207,89 +192,58 @@ class Light:
         body = json.dumps(message).encode()
         return body
 
-class PHSensor:
-    def __init__(self, name, temp_sensor):
-        self.__name = name
+class PHSensor(SmartThingsAPIDevice):
+    def __init__(self, device_name, temp_sensor):
+        super(PHSensor, self).__init__(device_type='ph', device_name=device_name)
         self.__sensor = AtlasI2C(address=99)
-        self.__ph_readings = deque([], maxlen=5)
         self.__temp_sensor = temp_sensor
 
-    def read(self):
+    def read(self, tempC=None):
         # Read the temp from our service
-        pH = self.__sensor.query('RT,' + str(self.__temp_sensor.readC()))
+        if tempC is None:
+            tempC = self.__temp_sensor.readC()
+
+        pH = self.__sensor.query('RT,' + str(tempC))
         if pH.startswith('Command succeeded '):
             pH = float(pH[18:].rstrip("\0"))
             return pH
         return None
 
-    def get_response(self):
-        '''
-        Get a response for an HTTP GET or POST
-        '''
-        resp = make_response(self.__get_body())
-        resp.headers['Device'] = 'temperature/' + self.__name
-        return resp
-
-    def notify(self):
-        '''
-        Push an unsolicited update to SmartThings
-        '''
-        body = self.__get_body()
-        headers = {
-            'Content-Type': 'application/json',
-            'Content-Length': len(body),
-            'Device': 'ph/' + self.__name
-        }
-        req = urllib.request.Request(notify_url, method='NOTIFY', headers=headers, data=body)
-        urllib.request.urlopen(req, timeout=15)
-
-    def __get_body(self):
+    def get_body(self):
         '''
         Get the body we send out for response/notify
         '''
         pH = self.read()
-        message = {
-            'pH': pH
-        }
-        body = json.dumps(message).encode()
-        return body
+        if pH is not None:
+            message = {
+                'pH': pH
+            }
+            body = json.dumps(message).encode()
+            return body
+        return ''
 
-class TemperatureSensor:
-    def __init__(self, name):
-        self.__name = name
+class TemperatureSensor(SmartThingsAPIDevice):
+    def __init__(self, device_name):
+        super(TemperatureSensor, self).__init__(device_type='temperature', device_name=device_name)
         self.__sensor = W1ThermSensor(W1ThermSensor.THERM_SENSOR_DS18B20, "02099177ba76")
 
     def celcius_to_fahrenheit(self, tempC):
         return round((9.0/5.0 * tempC + 32), 2)
 
+    def __read(self):
+        readings = []
+        for i in range(3):
+            readings.append(self.__sensor.get_temperature(W1ThermSensor.DEGREES_C))
+            readings.append(self.__sensor.get_temperature(W1ThermSensor.DEGREES_C))
+        return round(numpy.median(readings), 3)
+
     def readC(self):
-        # Read the temp from our service
-        return self.__sensor.get_temperature(W1ThermSensor.DEGREES_C)
+        return self.__read()
 
     def readF(self):
-        # Read the temp from our service
-        return round(self.__sensor.get_temperature(W1ThermSensor.DEGREES_F), 2)
-
-    def get_response(self):
-        '''
-        Get a response for an HTTP GET or POST
-        '''
-        resp = make_response(self.__get_body())
-        resp.headers['Device'] = 'temperature/' + self.__name
-        return resp
-
-    def notify(self):
-        '''
-        Push an unsolicited update to SmartThings
-        '''
-        body = self.__get_body()
-        headers = {
-            'Content-Type': 'application/json',
-            'Content-Length': len(body),
-            'Device': 'temperature/' + self.__name
-        }
-        req = urllib.request.Request(notify_url, method='NOTIFY', headers=headers, data=body)
-        urllib.request.urlopen(req, timeout=15)
+        tempC = self.readC()
+        tempF = self.celcius_to_fahrenheit(tempC)
+        return tempF
 
     def __get_body(self):
         '''
@@ -392,12 +346,13 @@ valves = {
 
 # Our lights
 lights = {
-    'tank': Light()
+    'tank': Light('tank')
 }
 
 def log_to_thingspeak():
-    tempF = temp_sensor.readF()
-    pH = ph_sensor.read()
+    tempC = temp_sensor.readC()
+    tempF = temp_sensor.celcius_to_fahrenheit(tempC)
+    pH = ph_sensor.read(tempC)
     try:
         f = urllib.request.urlopen(thingspeak_base_url + "&field1=%s&field2=%s" % (str(tempF), str(pH)), timeout=15)
         f.close()
