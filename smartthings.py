@@ -314,6 +314,12 @@ def top_off():
             fill_valve.open()
             fill_valve.notify()
 
+def close_drain_after_timeout():
+    app.logger.warn('Closing drain after timeout')
+    drain_valve = valves['drain']
+    drain_valve.close()
+    drain_valve.notify()
+
 def close_fill_when_full():
     #app.logger.info("Checking if tank is full")
     if water_level_sensor.is_full():
@@ -321,7 +327,7 @@ def close_fill_when_full():
         fill_valve = valves['fill']
         fill_valve.close()
         fill_valve.notify()
-    elif fill_valve.open_duration() > 1200:
+    elif fill_valve.open_duration() > 1200: # 20 minutes
         app.logger.warn("Fill valve open for too long!")
         fill_valve = valves['fill']
         fill_valve.close()
@@ -351,8 +357,16 @@ water_level_sensor = WaterLevelSensor(5)
 
 # Our valves
 valves = {
-    'drain': Valve('drain', 17),
+    'drain': Valve('drain', 17,
+        # On open, we start a 5 minute timer
+        # If the valve is still open at the end of the timer, close it for safety
+        open_action = lambda: scheduler.add_job(close_drain_after_timeout, 'interval', seconds=300, id='close_drain_after_timeout'),
+        close_action = lambda: scheduler.remove_job('close_drain_after_timeout')
+    ),
     'fill': Valve('fill', 27,
+        # On open, we first check that the tank isn't already full
+        # We also check every second to make sure the tank hasn't filled up
+        # close_fill_when_full will also close the fill valve if left open for too long.
         open_precheck= lambda: not water_level_sensor.is_full(),
         open_action = lambda: scheduler.add_job(close_fill_when_full, 'interval', seconds=1, id='close_fill_when_full'),
         close_action = lambda: scheduler.remove_job('close_fill_when_full')
