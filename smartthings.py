@@ -26,6 +26,22 @@ api = Api(app)
 notify_url = 'http://192.168.1.121:39500/notify'
 GPIO.setmode(GPIO.BCM)
 
+def mail(subject, message):
+    FROM="SmartThings@FishTank"
+    TO="root"
+    message = """\
+From: %s
+To: %s
+Subject: %s
+
+%s
+""" % (FROM, TO, subject, message)
+    p = os.popen("/usr/sbin/sendmail -t -i", "w")
+    p.write(message)
+    status = p.close()
+    if status != 0:
+        print("Sendmail exit status" + str(status))
+
 class Switch:
     def __init__(self, gpio):
         self.__gpio = gpio
@@ -319,19 +335,20 @@ def close_drain_after_timeout():
     drain_valve = valves['drain']
     drain_valve.close()
     drain_valve.notify()
+    mail('Drain timeout', 'Closing drain after timeout')
 
 def close_fill_when_full():
     #app.logger.info("Checking if tank is full")
+    fill_valve = valves['fill']
     if water_level_sensor.is_full():
         app.logger.info("Tank is full, closing fill valve")
-        fill_valve = valves['fill']
         fill_valve.close()
         fill_valve.notify()
     elif fill_valve.open_duration() > 1200: # 20 minutes
         app.logger.warn("Fill valve open for too long!")
-        fill_valve = valves['fill']
         fill_valve.close()
         fill_valve.notify()
+        mail('Fill timeout', 'Closing fill after timeout')
 
 # Stop draining the tank
 def water_change_drain_complete():
