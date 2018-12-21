@@ -61,6 +61,7 @@ class SmartThingsAPIDevice:
     def __init__(self, device_name, device_type):
         self.device_type = device_type
         self.device_name = device_name
+        self.__device_path = self.device_type + '/' + self.device_name
 
     def notify(self):
         '''
@@ -70,7 +71,7 @@ class SmartThingsAPIDevice:
         headers = {
             'Content-Type': 'application/json',
             'Content-Length': len(body),
-            'Device': self.device_type + '/' + self.device_name
+            'Device': self.__device_path
         }
         req = urllib.request.Request(notify_url, method='NOTIFY', headers=headers, data=body)
         urllib.request.urlopen(req, timeout=15)
@@ -80,7 +81,7 @@ class SmartThingsAPIDevice:
         Get a response for an HTTP GET or POST
         '''
         resp = make_response(self.get_body())
-        resp.headers['Device'] = self.device_type + '/' + self.device_name
+        resp.headers['Device'] = self.__device_path
         return resp
 
 class Valve(SmartThingsAPIDevice):
