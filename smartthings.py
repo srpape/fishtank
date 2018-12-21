@@ -249,7 +249,7 @@ class PHSensor:
         '''
         pH = self.read()
         message = {
-            'pH': self.read()
+            'pH': pH
         }
         body = json.dumps(message).encode()
         return body
@@ -344,7 +344,7 @@ def close_fill_when_full():
         app.logger.info("Tank is full, closing fill valve")
         fill_valve.close()
         fill_valve.notify()
-    elif fill_valve.open_duration() > 1200: # 20 minutes
+    elif fill_valve.open_duration() > 600: # 10 minutes
         app.logger.warn("Fill valve open for too long!")
         fill_valve.close()
         fill_valve.notify()
@@ -498,7 +498,7 @@ def change_water():
     if not water_level_sensor.is_full:
         return "Tank not full, politely refusing", 406
 
-    scheduler.add_job(water_change_drain_complete, 'interval', seconds=60, id='water_change_drain_complete')
+    scheduler.add_job(water_change_drain_complete, 'interval', seconds=30, id='water_change_drain_complete')
     drain_valve = valves['drain']
     drain_valve.open()
     drain_valve.notify()
