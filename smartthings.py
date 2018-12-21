@@ -505,7 +505,7 @@ def change_water():
     return "OK"
 
 class Action(Resource):
-    def get(self, name):
+    def post(self, name):
         if name == 'change_water':
             return change_water()
 
