@@ -245,7 +245,7 @@ class TemperatureSensor(SmartThingsAPIDevice):
         tempF = self.celcius_to_fahrenheit(tempC)
         return tempF
 
-    def __get_body(self):
+    def get_body(self):
         '''
         Get the body we send out for response/notify
         '''
