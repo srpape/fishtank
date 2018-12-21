@@ -11,12 +11,21 @@ from AtlasI2C import AtlasI2C
 from w1thermsensor import W1ThermSensor
 from datetime import datetime
 
+import configparser
 import RPi.GPIO as GPIO
 import urllib.request
 import json
 import numpy
 import os
 import logging
+
+# Parse configuration
+config = configparser.ConfigParser()
+config.read('/etc/tank_monitor.conf')
+
+thingspeak_api_key = None
+if 'thingspeak' in config.sections():
+    thingspeak_api_key = config['thingspeak'].get('api_key')
 
 app = Flask(__name__)
 api = Api(app)
@@ -44,18 +53,22 @@ Subject: %s
 class Switch:
     def __init__(self, gpio):
         self.__gpio = gpio
+        self.__on = False
 
         # Prepare GPIO
         GPIO.setup(self.__gpio, GPIO.OUT)
         self.off()
 
+    def is_on(self):
+        return self.__on
+
     def off(self):
         GPIO.output(self.__gpio, GPIO.LOW)
-        self.state = 'off'
+        self.__on = False
 
     def on(self):
         GPIO.output(self.__gpio, GPIO.HIGH)
-        self.state = 'on'
+        self.__on = True
 
 class SmartThingsAPIDevice:
     def __init__(self, device_name, device_type):
@@ -131,7 +144,7 @@ class Valve(SmartThingsAPIDevice):
             self.__open_action()
 
     def is_open(self):
-        return self.state == 'open'
+        return self.__switch.is_on()
 
     def get_body(self):
         '''
@@ -317,11 +330,6 @@ def water_change_drain_complete():
     fill_valve.open() # Should auto shut-off when full
     fill_valve.notify()
 
-# Our ThingSpeak API Key
-with open(os.path.expanduser('/home/papes/.fishtank_thingspeak_api_key'), 'r') as f:
-    thingspeak_api_key = f.read().rstrip()
-    thingspeak_base_url = 'https://api.thingspeak.com/update?api_key=%s' % thingspeak_api_key
-
 # Our sensors
 temp_sensor = TemperatureSensor('tank')
 ph_sensor = PHSensor('tank', temp_sensor)
@@ -365,7 +373,8 @@ def log_to_thingspeak():
 @scheduler.scheduled_job('cron', id='log_to_cloud', minute='*')
 def log_to_cloud():
     # Notify ThingSpeak
-    log_to_thingspeak()
+    if thingspeak_api_key is not None:
+        log_to_thingspeak()
 
     # Notify SmartThings
     temp_sensor.notify()
