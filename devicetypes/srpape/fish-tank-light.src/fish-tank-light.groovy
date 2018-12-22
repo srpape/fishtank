@@ -37,8 +37,10 @@ metadata {
 
 // parse events into attributes
 def parse(command) {
+  log.debug("parse(): command=${command}")
   def newState = command.state.toInteger()
   if (newState != state.internal_level) {
+    log.debug("newState: ${newState}")
     if (newState == 0) {
       state.internal_level = newState
       sendEvent(name: "switch", value: "off")
@@ -53,21 +55,39 @@ def parse(command) {
       state.level = 100
       sendEvent(name: "level", value: state.level)
     } else {
-      log.debug "State not updated : ${command.state}"
+      log.debug "Invalid state : ${command.state}"
     }
+  } else {
+    log.debug "State not updated : ${command.state}"
   }
 }
 
 // handle commands
 public def setLevel(value) {
   log.debug "setLevel(): ${value}"
+  
+  def is_on = (state.internal_level != 0)
+  
   if (value >= 50) {
     state.internal_level = 2
     state.level = 100
-  } else {
+    if (!is_on) {
+      sendEvent(name: "switch", value: "on")
+    }
+  } else if (value >= 1) {
     state.internal_level = 1
     state.level = 49
+    if (!is_on) {
+      sendEvent(name: "switch", value: "on")
+    }
+  } else {
+  	state.internal_level = 0
+  	state.level = 0
+    if (is_on) {
+      sendEvent(name: "switch", value: "off")
+    }
   }
+  
   parent.setState(state.deviceId, state.internal_level)
   sendEvent(name: "level", value: state.level)
 }
@@ -79,7 +99,6 @@ def off() {
 }
 
 def on() {
-  log.debug "on() : ${state.internal_level}"
   if (state.internal_level == null || state.internal_level == 0) {
     // The level is set to off, resume the previous level
     if (state.level == null || state.level == 0) {
