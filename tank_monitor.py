@@ -281,16 +281,27 @@ class TemperatureSensor(SmartThingsAPIDevice):
         body = json.dumps(message).encode()
         return body
 
-class WaterLevelSensor:
+class WaterLevelSensor(SmartThingsAPIDevice):
     '''
     Used to check if the tank is full
     '''
-    def __init__(self, gpio):
+    def __init__(self, device_name, gpio):
+        super(WaterLevelSensor, self).__init__(device_type='water_level', device_name=device_name)
         self.__gpio = gpio
         GPIO.setup(self.__gpio, GPIO.IN)
 
     def is_full(self):
         return GPIO.input(self.__gpio)
+
+    def get_body(self):
+        '''
+        Get the body we send out for response/notify
+        '''
+        message = {
+            'state': self.is_full(),
+        }
+        body = json.dumps(message).encode()
+        return body
 
 # Prepare scheduler
 scheduler = BackgroundScheduler(daemon=True)
@@ -317,6 +328,7 @@ def close_drain_after_timeout():
 def close_fill_when_full():
     #app.logger.info("Checking if tank is full")
     fill_valve = valves['fill']
+    water_level_sensor.notify()
     if water_level_sensor.is_full():
         app.logger.info("Tank is full, closing fill valve")
         fill_valve.close()
@@ -343,7 +355,7 @@ def water_change_drain_complete():
 # Our sensors
 temp_sensor = TemperatureSensor('tank')
 ph_sensor = PHSensor('tank', temp_sensor)
-water_level_sensor = WaterLevelSensor(5)
+water_level_sensor = WaterLevelSensor('tank', 5)
 
 # Our valves
 valves = {
@@ -387,6 +399,7 @@ def log_to_cloud():
         log_to_thingspeak()
 
     # Notify SmartThings
+    water_level_sensor.notify()
     temp_sensor.notify()
     ph_sensor.notify()
 
@@ -401,6 +414,13 @@ class PH(Resource):
     def get(self, name):
         if(name == "tank"):
             return ph_sensor.get_response()
+
+        return "pH sensor not found", 404
+
+class WaterLevel(Resource):
+    def get(self, name):
+        if(name == "tank"):
+            return water_level_sensor.get_response()
 
         return "pH sensor not found", 404
 
@@ -442,6 +462,8 @@ class ValveHTTP(Resource):
 
 class Subscription(Resource):
     def get(self, name):
+        global smartthings_notify_url
+        
         # Update our NOTIFY URL for posting events to SmartThings
         new_smartthings_notify_url = 'http://' + name.strip()
         if new_smartthings_notify_url != smartthings_notify_url:
@@ -507,6 +529,7 @@ class Action(Resource):
 api.add_resource(LightHTTP, "/light/<string:name>")
 api.add_resource(Temperature, "/temperature/<string:name>")
 api.add_resource(PH, "/ph/<string:name>")
+api.add_resource(WaterLevel, "/water_level/<string:name>")
 api.add_resource(ValveHTTP, "/valve/<string:name>")
 api.add_resource(Subscription, "/subscribe/<string:name>")
 api.add_resource(Action, "/action/<string:name>")
