@@ -333,7 +333,7 @@ def close_fill_when_full():
         app.logger.info("Tank is full, closing fill valve")
         fill_valve.close()
         fill_valve.notify()
-    elif fill_valve.open_duration() > 600: # 10 minutes
+    elif fill_valve.open_duration() > 900: # 15 minutes
         app.logger.warn("Fill valve open for too long!")
         fill_valve.close()
         fill_valve.notify()
@@ -463,7 +463,7 @@ class ValveHTTP(Resource):
 class Subscription(Resource):
     def get(self, name):
         global smartthings_notify_url
-        
+
         # Update our NOTIFY URL for posting events to SmartThings
         new_smartthings_notify_url = 'http://' + name.strip()
         if new_smartthings_notify_url != smartthings_notify_url:
