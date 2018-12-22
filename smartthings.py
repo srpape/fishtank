@@ -19,19 +19,26 @@ import numpy
 import os
 import logging
 
+config_path = '/etc/tank_monitor.conf'
+
 # Parse configuration
 config = configparser.ConfigParser()
-config.read('/etc/tank_monitor.conf')
+config.read(config_path)
 
-thingspeak_api_key = None
-if 'thingspeak' in config.sections():
-    thingspeak_api_key = config['thingspeak'].get('api_key')
+# thingspeak config
+thingspeak_base_url = ''
+if config.has_option('thingspeak', 'api_key'):
+    thingspeak_api_key = config.get('thingspeak', 'api_key').strip()
+    if thingspeak_api_key:
+        thingspeak_base_url = 'https://api.thingspeak.com/update?api_key=%s' % thingspeak_api_key
+
+# smartthings config
+smartthings_notify_url = ''
+if config.has_option('smartthings', 'notify_url'):
+    smartthings_notify_url = config.get('smartthings', 'notify_url')
 
 app = Flask(__name__)
 api = Api(app)
-
-# TODO: Let the hub provide this via /subscribe
-notify_url = 'http://192.168.1.121:39500/notify'
 GPIO.setmode(GPIO.BCM)
 
 def mail(subject, message):
@@ -86,8 +93,9 @@ class SmartThingsAPIDevice:
             'Content-Length': len(body),
             'Device': self.__device_path
         }
-        req = urllib.request.Request(notify_url, method='NOTIFY', headers=headers, data=body)
-        urllib.request.urlopen(req, timeout=15)
+        if smartthings_notify_url:
+            req = urllib.request.Request(smartthings_notify_url, method='NOTIFY', headers=headers, data=body)
+            urllib.request.urlopen(req, timeout=15)
 
     def get_response(self):
         '''
@@ -161,10 +169,11 @@ class Light(SmartThingsAPIDevice):
         self.__day_light = Switch(23)
         self.__night_light = Switch(25)
         self.state = 0
+        self.__state_file = '/tmp/' + self.device_name + '_light_state.txt'
 
         # Load the initial light state (if possible)
         try:
-            with open('/tmp/' + self.device_name + '_light_state.txt', 'r') as f:
+            with open(self.__state_file, 'r') as f:
                 self.set_state(int(f.read()))
         except IOError:
              pass
@@ -195,7 +204,7 @@ class Light(SmartThingsAPIDevice):
             return
 
         self.state = state
-        with open('/tmp/tank_light_state.txt', 'w') as f:
+        with open(self.__state_file, 'w') as f:
             f.write(str(self.state))
 
     def get_body(self):
@@ -322,6 +331,7 @@ def close_fill_when_full():
 def water_change_drain_complete():
     scheduler.remove_job('water_change_drain_complete')
 
+    # TODO: If the user closes the drain early, close() throws an exception trying to run the close action
     drain_valve = valves['drain']
     drain_valve.close()
     drain_valve.notify()
@@ -373,7 +383,7 @@ def log_to_thingspeak():
 @scheduler.scheduled_job('cron', id='log_to_cloud', minute='*')
 def log_to_cloud():
     # Notify ThingSpeak
-    if thingspeak_api_key is not None:
+    if thingspeak_base_url:
         log_to_thingspeak()
 
     # Notify SmartThings
@@ -432,7 +442,15 @@ class ValveHTTP(Resource):
 
 class Subscription(Resource):
     def get(self, name):
-        return "OK"
+        # Update our value
+        smartthings_notify_url = 'http://' + name.strip()
+        # Update our config file
+        if not config.has_section('smartthings'):
+            config.add_section('smartthings')
+        config.set('smartthings', 'notify_url', smartthings_notify_url)
+        # Write it back out
+        with open(config_path, 'w') as f:
+            config.write(f)
 
 class LightHTTP(Resource):
     def get(self, name):
@@ -459,11 +477,14 @@ class LightHTTP(Resource):
         light.set_state(state)
         return light.get_response()
 
-def change_water():
+def change_water(time):
     if not water_level_sensor.is_full:
         return "Tank not full, politely refusing", 406
 
-    scheduler.add_job(water_change_drain_complete, 'interval', seconds=30, id='water_change_drain_complete')
+    if time is None:
+        time = 90
+
+    scheduler.add_job(water_change_drain_complete, 'interval', seconds=time, id='water_change_drain_complete')
     drain_valve = valves['drain']
     drain_valve.open()
     drain_valve.notify()
@@ -472,7 +493,12 @@ def change_water():
 class Action(Resource):
     def post(self, name):
         if name == 'change_water':
-            return change_water()
+            parser = reqparse.RequestParser()
+            parser.add_argument('time')
+            args = parser.parse_args()
+            time = args.get('time')
+
+            return change_water(time)
 
         return "Action not found", 404
 
