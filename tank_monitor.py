@@ -442,15 +442,17 @@ class ValveHTTP(Resource):
 
 class Subscription(Resource):
     def get(self, name):
-        # Update our value
-        smartthings_notify_url = 'http://' + name.strip()
-        # Update our config file
-        if not config.has_section('smartthings'):
-            config.add_section('smartthings')
-        config.set('smartthings', 'notify_url', smartthings_notify_url)
-        # Write it back out
-        with open(config_path, 'w') as f:
-            config.write(f)
+        # Update our NOTIFY URL for posting events to SmartThings
+        new_smartthings_notify_url = 'http://' + name.strip()
+        if new_smartthings_notify_url != smartthings_notify_url:
+            smartthings_notify_url = new_smartthings_notify_url
+            # Update our config file
+            if not config.has_section('smartthings'):
+                config.add_section('smartthings')
+            config.set('smartthings', 'notify_url', smartthings_notify_url)
+            # Write it back out
+            with open(config_path, 'w') as f:
+                config.write(f)
 
 class LightHTTP(Resource):
     def get(self, name):
