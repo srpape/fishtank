@@ -482,7 +482,7 @@ def change_water(time):
         return "Tank not full, politely refusing", 406
 
     if time is None:
-        time = 90
+        time = 120
 
     scheduler.add_job(water_change_drain_complete, 'interval', seconds=time, id='water_change_drain_complete')
     drain_valve = valves['drain']

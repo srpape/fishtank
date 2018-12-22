@@ -1,10 +1,10 @@
 [Unit]
-Description=SmartThings REST API
+Description=Fish Tank Monitor
 After=multi-user.target
 
 [Service]
 Type=idle
-ExecStart=/usr/bin/python3 /home/papes/fishtank/smartthings.py
+ExecStart=/usr/bin/python3 /home/papes/fishtank/tank_monitor.py
 KillSignal=SIGINT
  
 [Install]
