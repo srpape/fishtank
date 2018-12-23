@@ -200,7 +200,7 @@ public def setLevel(value) {
   	state.level = 0
   }
   
-  parent.setState("light/tank", state.internal_level)
+  setState("light/tank", state.internal_level)
 }
 
 def off() {
