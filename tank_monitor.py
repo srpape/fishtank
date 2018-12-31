@@ -307,14 +307,32 @@ class WaterLevelSensor(SmartThingsAPIDevice):
 scheduler = BackgroundScheduler(daemon=True)
 scheduler.start()
 
-#@scheduler.scheduled_job('interval', id='top_off', minutes=1)
+auto_fill_locked_out = False
+
+default_max_fill_time = 60 * 2 # 2 minutes
+
+current_max_fill_time = default_max_fill_time
+
+# Our sensors
+temp_sensor = TemperatureSensor('tank')
+ph_sensor = PHSensor('tank', temp_sensor)
+water_level_sensor = WaterLevelSensor('tank', 5)
+
+@scheduler.scheduled_job('interval', id='top_off', minutes=5)
 def top_off():
-    #app.logger.info("Checking for top off")
-    fill_valve = valves['fill']
-    drain_valve = valves['drain']
-    if not fill_valve.is_open() and not drain_valve.is_open():
-        if not water_level_sensor.is_full():
+    global current_max_fill_time
+
+    if not water_level_sensor.is_full():
+        # Don't run if we've had a timeout error
+        if auto_fill_locked_out:
+            app.logger.warn("Auto-fill locked out, not filling")
+            return
+
+        fill_valve = valves['fill']
+        drain_valve = valves['drain']
+        if not fill_valve.is_open() and not drain_valve.is_open():
             app.logger.info("Topping off tank")
+            current_max_fill_time = 15 # 15 seconds should be plenty for a top off
             fill_valve.open()
             fill_valve.notify()
 
@@ -326,15 +344,23 @@ def close_drain_after_timeout():
     mail('Drain timeout', 'Closing drain after timeout')
 
 def close_fill_when_full():
+    global auto_fill_locked_out
+    global current_max_fill_time
+
     #app.logger.info("Checking if tank is full")
     fill_valve = valves['fill']
     water_level_sensor.notify()
     if water_level_sensor.is_full():
         app.logger.info("Tank is full, closing fill valve")
+        auto_fill_locked_out = False
         fill_valve.close()
         fill_valve.notify()
-    elif fill_valve.open_duration() > 900: # 15 minutes
+
+        # Restore this to the default
+        current_max_fill_time = default_max_fill_time
+    elif fill_valve.open_duration() > current_max_fill_time:
         app.logger.warn("Fill valve open for too long!")
+        auto_fill_locked_out = True
         fill_valve.close()
         fill_valve.notify()
         mail('Fill timeout', 'Closing fill after timeout')
@@ -342,6 +368,8 @@ def close_fill_when_full():
 # Stop draining the tank
 def water_change_drain_complete():
     scheduler.remove_job('water_change_drain_complete')
+
+    app.logger.info("Water drain complete, starting fill...")
 
     # TODO: If the user closes the drain early, close() throws an exception trying to run the close action
     drain_valve = valves['drain']
@@ -352,10 +380,10 @@ def water_change_drain_complete():
     fill_valve.open() # Should auto shut-off when full
     fill_valve.notify()
 
-# Our sensors
-temp_sensor = TemperatureSensor('tank')
-ph_sensor = PHSensor('tank', temp_sensor)
-water_level_sensor = WaterLevelSensor('tank', 5)
+def on_fill_close():
+    global current_max_fill_time
+    current_max_fill_time = default_max_fill_time
+    scheduler.remove_job('close_fill_when_full')
 
 # Our valves
 valves = {
@@ -370,8 +398,8 @@ valves = {
         # We also check every second to make sure the tank hasn't filled up
         # close_fill_when_full will also close the fill valve if left open for too long.
         open_precheck= lambda: not water_level_sensor.is_full(),
-        open_action = lambda: scheduler.add_job(close_fill_when_full, 'interval', seconds=1, id='close_fill_when_full'),
-        close_action = lambda: scheduler.remove_job('close_fill_when_full')
+        open_action = lambda: scheduler.add_job(close_fill_when_full, 'interval', seconds=3, id='close_fill_when_full'),
+        close_action = on_fill_close
     ),
 }
 
@@ -501,12 +529,23 @@ class LightHTTP(Resource):
         light.set_state(state)
         return light.get_response()
 
-def change_water(time):
+def change_water(time : int = None):
+    global current_max_fill_time
+
     if not water_level_sensor.is_full:
         return "Tank not full, politely refusing", 406
 
+    if auto_fill_locked_out:
+        app.logger.info("Auto-fill is locked due to error, refusing water change")
+        return "Auto-fill is locked due to error, refusing water change", 500
+
     if time is None:
-        time = 120
+        time = 60 * 2 # 2 minutes
+
+    app.logger.info("Starting " + str(time) + " second water change")
+
+    # How long (at most) we want to run the fill up
+    current_max_fill_time = 60 * 18 # 18 minutes
 
     scheduler.add_job(water_change_drain_complete, 'interval', seconds=time, id='water_change_drain_complete')
     drain_valve = valves['drain']
