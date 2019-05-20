@@ -137,28 +137,24 @@ def parse_json(deviceId, json) {
 private parse_light(command) {
   log.debug("parse(): command=${command}")
   
-  def newState = command.state.toInteger()
-  if (newState != state.internal_level) {
-    log.debug("newState: ${newState}")
-    if (newState == 0) {
-      state.internal_level = newState
-      sendEvent(name: "switch", value: "off")
-    } else if(newState == 1) {
-      state.internal_level = newState
-      sendEvent(name: "switch", value: "on")
-      state.level = 49
-      sendEvent(name: "level", value: state.level)
-    } else if(newState == 2) {
-      state.internal_level = newState
-      sendEvent(name: "switch", value: "on")
-      state.level = 100
-      sendEvent(name: "level", value: state.level)
-    } else {
-      log.debug "Invalid state : ${command.state}"
-    }
+  def internal_level = command.state.toInteger()
+  if (internal_level == 2) {
+  	// Full light
+    state.last_level = 100    
+    sendEvent(name: "level", value: 100)    
+    sendEvent(name: "switch", value: "on")
+  } else if (internal_level == 1) {
+    // Night light
+    state.last_level = 49        
+    sendEvent(name: "level", value: 49)    
+    sendEvent(name: "switch", value: "on")
+  } else if (internal_level == 0) {
+    // Off
+    sendEvent(name: "level", value: 0)
+    sendEvent(name: "switch", value: "off")
   } else {
-    log.debug "State not updated : ${command.state}"
-  }
+    log.debug "Invalid state : ${command.state}"
+  }  
 }
 
 def change_water() {
@@ -187,44 +183,21 @@ public setState(String deviceId, state) {
 
 // handle commands
 public def setLevel(value) {
-  log.debug "setLevel(): ${value}"
-  
-  if (value >= 50) {
-    state.internal_level = 2
-    state.level = 100
-  } else if (value >= 1) {
-    state.internal_level = 1
-    state.level = 49
-  } else {
-  	state.internal_level = 0
-  	state.level = 0
-  }
-  
-  setState("light/tank", state.internal_level)
+    log.debug "setLevel(): ${value}"
+
+    if (value >= 50) {
+        setState("light/tank", 2)
+    } else if (value >= 1) {
+        setState("light/tank", 1)
+    } else {
+        setState("light/tank", 0)
+    }
 }
 
 def off() {
-  sendEvent(name: "switch", value: "off")
-  state.internal_level = 0
-  setState("light/tank", 0)
+	setLevel(0)
 }
 
 def on() {
-  if (state.internal_level == null || state.internal_level == 0) {
-    // The level is set to off, resume the previous level
-    if (state.level == null || state.level == 0) {
-      state.level = 100
-    }
-    if (state.level > 50) {
-      state.internal_level = 2
-      state.level = 100
-    } else {
-      state.internal_level = 1
-      state.level = 49
-    }
-    log.debug "Updating level to ${state.level}"
-    sendEvent(name: "level", value: state.level)
-  }
-  setState("light/tank", state.internal_level)
-  sendEvent(name: "switch", value: "on")
+	setLevel(state.last_level)
 }
